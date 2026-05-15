@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/src/index.js"],
+      "env": {
+        "POWERBI_MCP_CACHE_DIR": "${CLAUDE_PLUGIN_DATA}/cache",
+        "POWERBI_MCP_ALLOW_INTERACTIVE_AUTH": "true"
+      }
+    }
+  }
+}

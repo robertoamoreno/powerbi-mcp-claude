@@ -1,0 +1,55 @@
+{
+  "manifest_version": "0.3",
+  "name": "powerbi-mcp-claude",
+  "display_name": "Power BI MCP for Claude",
+  "version": "0.1.5",
+  "description": "Claude Desktop extension for Power BI workspaces, semantic models, and Microsoft device-code sign-in.",
+  "long_description": "Provides Claude Desktop access to Power BI through stable local wrapper tools and Microsoft's remote Fabric Power BI MCP endpoint. When sign-in is needed, the server returns the Microsoft URL and device code in chat instead of requiring users to inspect terminal logs.",
+  "author": {
+    "name": "Roberto Moreno"
+  },
+  "license": "MIT",
+  "privacy_policies": [
+    "https://privacy.microsoft.com/privacystatement",
+    "https://www.anthropic.com/privacy"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/src/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/src/index.js"],
+      "env": {
+        "POWERBI_MCP_CACHE_DIR": "${HOME}/.powerbi-mcp-claude",
+        "POWERBI_MCP_ALLOW_INTERACTIVE_AUTH": "true",
+        "POWERBI_MCP_TENANT_ID": "${user_config.tenant_id}",
+        "POWERBI_MCP_CLIENT_ID": "${user_config.client_id}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["powerbi", "microsoft", "fabric", "mcp", "analytics"],
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.11.0"
+    }
+  },
+  "user_config": {
+    "tenant_id": {
+      "type": "string",
+      "title": "Microsoft tenant",
+      "description": "Tenant ID, tenant domain, or organizations.",
+      "default": "organizations",
+      "required": true
+    },
+    "client_id": {
+      "type": "string",
+      "title": "Microsoft public client ID",
+      "description": "Use the default Power BI public client, or provide your own public-client app registration.",
+      "default": "ea0616ba-638b-4df5-95b9-636659ae5121",
+      "required": true
+    }
+  }
+}

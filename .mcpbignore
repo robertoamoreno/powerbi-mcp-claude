@@ -1,0 +1,14 @@
+node_modules/.cache/
+node_modules/typescript/
+node_modules/@types/
+node_modules/undici-types/
+/src/
+/test/
+/dist/test/
+!dist/
+!dist/src/
+!dist/src/**
+.git/
+.gitignore
+*.mcpb
+.env

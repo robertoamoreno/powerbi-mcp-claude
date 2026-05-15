@@ -1,0 +1,419 @@
+import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
+import type { DeviceCodeResponse } from "@azure/msal-common/node";
+
+import type { DeviceCodePrompter, DeviceCodePromptResult } from "./auth.js";
+import {
+  firstRequestId,
+  idKey,
+  INTERNAL_ERROR,
+  INVALID_REQUEST,
+  isJsonRpcPayload,
+  isObject,
+  isResponse,
+  jsonRpcError,
+  normalizeId,
+  type JSONObject,
+  type JSONRPCId,
+  type JSONRPCPayload,
+  type JSONValue,
+} from "./jsonrpc.js";
+import {
+  AUTH_TOOL_NAMES,
+  isLocalToolCall,
+  mergeTools,
+  POWERBI_TOOL_NAMES,
+  toolsListResult,
+  type LocalPowerBITools,
+} from "./localTools.js";
+import { RemoteMCPError, type RemoteForwarder } from "./remote.js";
+import { invokeRemotePowerBITool, signInRequiredResult } from "./remotePowerBITools.js";
+import { log } from "./logger.js";
+import { VERSION } from "./version.js";
+
+type PendingRequest = {
+  resolve: (value: JSONValue) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+const DEFAULT_CLIENT_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+
+export class MCPProxyTransport implements DeviceCodePrompter {
+  private nextServerRequestId = 1;
+  private readonly pending = new Map<string, PendingRequest>();
+  private clientCapabilities: Record<string, unknown> = {};
+  private initializePayload: JSONRPCPayload | undefined;
+  private initializedNotification: JSONRPCPayload | undefined;
+  private remoteInitialized = false;
+
+  constructor(
+    private readonly remote: RemoteForwarder,
+    private readonly writePayload: (payload: JSONValue) => void,
+    private readonly localTools: LocalPowerBITools | undefined = undefined,
+  ) {}
+
+  async run(input: Readable): Promise<void> {
+    log("Power BI MCP stdio proxy started.");
+    const lines = createInterface({ input, crlfDelay: Infinity });
+
+    for await (const raw of lines) {
+      const line = raw.trim();
+      if (!line) {
+        continue;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch (error) {
+        this.writePayload(jsonRpcError(null, -32700, `Parse error: ${errorMessage(error)}`));
+        continue;
+      }
+
+      this.handleIncoming(parsed);
+    }
+
+    log("stdin closed; stopping proxy.");
+  }
+
+  handleIncoming(parsed: unknown): void {
+    if (!isJsonRpcPayload(parsed)) {
+      this.writePayload(jsonRpcError(null, INVALID_REQUEST, "Invalid JSON-RPC message."));
+      return;
+    }
+
+    const payload = this.resolveInternalResponses(parsed);
+    if (!payload) {
+      return;
+    }
+
+    if (this.handleLocalInitialize(payload)) {
+      return;
+    }
+    if (this.handleInitializedNotification(payload)) {
+      return;
+    }
+
+    void this.forwardClientPayload(payload);
+  }
+
+  supportsDeviceCodePrompt(): boolean {
+    const elicitation = this.clientCapabilities.elicitation;
+    if (!isObject(elicitation)) {
+      return false;
+    }
+
+    return isObject(elicitation.url);
+  }
+
+  async promptDeviceCode(response: DeviceCodeResponse): Promise<DeviceCodePromptResult> {
+    if (!this.supportsDeviceCodePrompt()) {
+      return "unavailable";
+    }
+
+    const elicitationId = `powerbi-device-code-${Date.now()}-${this.nextServerRequestId}`;
+    const result = await this.sendClientRequest(
+      "elicitation/create",
+      {
+        mode: "url",
+        elicitationId,
+        url: response.verificationUri,
+        message: `Microsoft sign-in is required for Power BI. Open the Microsoft page and enter code ${response.userCode}.`,
+      },
+      Math.max(response.expiresIn * 1000, DEFAULT_CLIENT_REQUEST_TIMEOUT_MS),
+    );
+
+    if (!isObject(result)) {
+      return "cancelled";
+    }
+
+    const action = result.action;
+    if (action === "accept") {
+      return "accepted";
+    }
+    if (action === "decline") {
+      return "declined";
+    }
+    if (action === "cancel") {
+      return "cancelled";
+    }
+
+    return "cancelled";
+  }
+
+  private async sendClientRequest(method: string, params: JSONObject, timeoutMs: number): Promise<JSONValue> {
+    const id = `powerbi-proxy-${this.nextServerRequestId++}`;
+    const key = idKey(id);
+
+    const result = new Promise<JSONValue>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(key);
+        reject(new Error(`Timed out waiting for client response to ${method}.`));
+      }, timeoutMs);
+
+      this.pending.set(key, { resolve, reject, timer });
+    });
+
+    this.writePayload({ jsonrpc: "2.0", id, method, params });
+    return await result;
+  }
+
+  private resolveInternalResponses(payload: JSONRPCPayload): JSONRPCPayload | undefined {
+    if (!Array.isArray(payload)) {
+      return this.tryResolveInternalResponse(payload) ? undefined : payload;
+    }
+
+    const passthrough: JSONValue[] = [];
+    for (const item of payload) {
+      if (this.tryResolveInternalResponse(item)) {
+        continue;
+      }
+      passthrough.push(item);
+    }
+
+    if (passthrough.length === 0) {
+      return undefined;
+    }
+
+    return passthrough;
+  }
+
+  private tryResolveInternalResponse(value: unknown): boolean {
+    if (!isResponse(value)) {
+      return false;
+    }
+
+    const pending = this.pending.get(idKey(normalizeId(value.id)));
+    if (!pending) {
+      return false;
+    }
+
+    this.pending.delete(idKey(normalizeId(value.id)));
+    clearTimeout(pending.timer);
+
+    if ("error" in value && value.error) {
+      pending.reject(new Error(formatJsonRpcError(value.error)));
+    } else {
+      pending.resolve(value.result ?? null);
+    }
+    return true;
+  }
+
+  private async forwardClientPayload(payload: JSONRPCPayload): Promise<void> {
+    try {
+      const localResponse = await this.handleLocalPayload(payload);
+      if (localResponse !== undefined) {
+        this.writePayload(localResponse);
+        return;
+      }
+
+      await this.ensureRemoteInitialized();
+      const response = await this.remote.forward(payload);
+      if (response !== null) {
+        this.writeServerResponse(response);
+      }
+    } catch (error) {
+      log(errorMessage(error));
+      this.writeForwardError(payload, error);
+    }
+  }
+
+  private async handleLocalPayload(payload: JSONRPCPayload): Promise<JSONValue | undefined> {
+    if (Array.isArray(payload) || !this.localTools) {
+      return undefined;
+    }
+
+    if (payload.method === "tools/list") {
+      const localTools = this.localTools.tools();
+      const requestId = normalizeId(payload.id);
+      if (!(await this.localTools.isAuthenticated())) {
+        return toolsListResult(requestId, localTools);
+      }
+
+      try {
+        await this.ensureRemoteInitialized();
+        const remoteResponse = await this.remote.forward(payload);
+        return remoteResponse === null ? toolsListResult(requestId, localTools) : mergeTools(remoteResponse, localTools);
+      } catch (error) {
+        log(`Could not load upstream Power BI MCP tools; exposing local tools only: ${errorMessage(error)}`);
+        return toolsListResult(requestId, localTools);
+      }
+    }
+
+    if (payload.method === "tools/call" && isObject(payload.params)) {
+      const localToolName = isLocalToolCall(payload.params);
+      if (localToolName) {
+        const args = isObject(payload.params.arguments) ? (payload.params.arguments as JSONObject) : {};
+        const result = await this.handleLocalToolCall(localToolName, args);
+        return {
+          jsonrpc: "2.0",
+          id: normalizeId(payload.id),
+          result,
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  private async handleLocalToolCall(name: string, args: JSONObject): Promise<JSONValue> {
+    if (!this.localTools) {
+      throw new Error("Local Power BI tools are not configured.");
+    }
+
+    if (AUTH_TOOL_NAMES.has(name)) {
+      return await this.localTools.handleToolCall(name, args);
+    }
+
+    if (POWERBI_TOOL_NAMES.has(name)) {
+      if (!(await this.localTools.isAuthenticated())) {
+        return signInRequiredResult(name);
+      }
+
+      await this.ensureRemoteInitialized();
+      return await invokeRemotePowerBITool(this.remote, name, args);
+    }
+
+    throw new Error(`Unknown local Power BI tool: ${name}`);
+  }
+
+  private async ensureRemoteInitialized(): Promise<void> {
+    if (this.remoteInitialized || !this.initializePayload) {
+      return;
+    }
+
+    const initializeResponse = await this.remote.forward(this.initializePayload);
+    if (initializeResponse !== null) {
+      // The local client already received a local initialize response. This response
+      // only confirms the upstream session and should not be echoed to Claude.
+    }
+
+    this.remoteInitialized = true;
+    if (this.initializedNotification) {
+      await this.remote.forward(this.initializedNotification);
+    }
+  }
+
+  private writeServerResponse(response: JSONValue): void {
+    if (Array.isArray(response)) {
+      for (const item of response) {
+        if (isServerMessage(item)) {
+          this.writePayload(item);
+        }
+      }
+      return;
+    }
+
+    if (isServerMessage(response)) {
+      this.writePayload(response);
+    }
+  }
+
+  private writeForwardError(payload: JSONRPCPayload, error: unknown): void {
+    const id = firstRequestId(payload);
+    if (id === null && !payloadHasRequestId(payload)) {
+      return;
+    }
+
+    if (error instanceof RemoteMCPError) {
+      this.writePayload(
+        jsonRpcError(id, error.code, error.message, {
+          http_status: error.httpStatus ?? null,
+          details: error.data ?? null,
+        }),
+      );
+      return;
+    }
+
+    this.writePayload(jsonRpcError(id, INTERNAL_ERROR, errorMessage(error)));
+  }
+
+  private captureInitializeCapabilities(payload: JSONRPCPayload): void {
+    const initialize = Array.isArray(payload)
+      ? payload.find((item) => isObject(item) && item.method === "initialize")
+      : payload;
+
+    if (!isObject(initialize) || initialize.method !== "initialize" || !isObject(initialize.params)) {
+      return;
+    }
+
+    if (isObject(initialize.params.capabilities)) {
+      this.clientCapabilities = initialize.params.capabilities;
+    }
+  }
+
+  private handleLocalInitialize(payload: JSONRPCPayload): boolean {
+    if (Array.isArray(payload) || payload.method !== "initialize") {
+      return false;
+    }
+
+    this.initializePayload = payload;
+    this.remoteInitialized = false;
+    this.captureInitializeCapabilities(payload);
+
+    const protocolVersion =
+      isObject(payload.params) && typeof payload.params.protocolVersion === "string"
+        ? payload.params.protocolVersion
+        : "2025-11-25";
+
+    this.writePayload({
+      jsonrpc: "2.0",
+      id: normalizeId(payload.id),
+      result: {
+        protocolVersion,
+        capabilities: {
+          tools: {},
+        },
+        serverInfo: {
+          name: "powerbi-mcp-claude",
+          title: "Power BI MCP for Claude",
+          version: VERSION,
+        },
+        instructions:
+          "Use the Power BI tools for Microsoft Power BI and Fabric analytics. If a tool says sign-in is required, call powerbi_auth_start and show the returned Microsoft URL and code to the user.",
+      },
+    });
+
+    return true;
+  }
+
+  private handleInitializedNotification(payload: JSONRPCPayload): boolean {
+    if (Array.isArray(payload) || payload.method !== "notifications/initialized") {
+      return false;
+    }
+
+    this.initializedNotification = payload;
+    return true;
+  }
+}
+
+export function makeStdoutWriter(output: Writable): (payload: JSONValue) => void {
+  return (payload: JSONValue): void => {
+    output.write(`${JSON.stringify(payload)}\n`);
+  };
+}
+
+function isServerMessage(value: unknown): value is JSONValue {
+  return isObject(value) && ("id" in value || typeof value.method === "string");
+}
+
+function payloadHasRequestId(payload: JSONRPCPayload): boolean {
+  if (Array.isArray(payload)) {
+    return payload.some((item) => isObject(item) && "id" in item && typeof item.method === "string");
+  }
+
+  return "id" in payload && typeof payload.method === "string";
+}
+
+function formatJsonRpcError(error: unknown): string {
+  if (isObject(error) && typeof error.message === "string") {
+    return error.message;
+  }
+
+  return JSON.stringify(error);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

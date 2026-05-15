@@ -1,0 +1,11 @@
+{
+  "name": "powerbi-mcp",
+  "version": "0.1.5",
+  "description": "Claude Code plugin wrapper for the Power BI MCP local proxy.",
+  "author": {
+    "name": "Roberto Moreno"
+  },
+  "license": "MIT",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/"
+}

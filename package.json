@@ -1,0 +1,52 @@
+{
+  "name": "powerbi-mcp-claude",
+  "version": "0.1.5",
+  "description": "Claude-ready local MCP proxy for Microsoft Power BI's remote MCP endpoint.",
+  "type": "module",
+  "bin": {
+    "powerbi-mcp-claude": "dist/src/index.js"
+  },
+  "files": [
+    "dist",
+    "manifest.json",
+    ".claude-plugin",
+    ".mcp.json",
+    "skills",
+    "hooks",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "start": "node dist/src/index.js",
+    "status": "node dist/src/index.js --status",
+    "login": "node dist/src/index.js --login",
+    "logout": "node dist/src/index.js --logout",
+    "pretest": "npm run build",
+    "test": "node --test dist/test/*.test.js",
+    "prepack:mcpb": "npm run build",
+    "pack:mcpb": "npx -y @anthropic-ai/mcpb pack"
+  },
+  "keywords": [
+    "claude",
+    "mcp",
+    "powerbi",
+    "fabric",
+    "mcpb"
+  ],
+  "author": {
+    "name": "Roberto Moreno"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@azure/msal-node": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
