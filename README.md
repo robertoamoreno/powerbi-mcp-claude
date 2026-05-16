@@ -38,7 +38,7 @@ npm run build
 npm run pack:mcpb
 ```
 
-The root `manifest.json` describes the Claude Desktop extension. It passes `POWERBI_MCP_CACHE_DIR`, `POWERBI_MCP_TENANT_ID`, and `POWERBI_MCP_CLIENT_ID` into the server.
+The root `manifest.json` describes the Claude Desktop extension. It passes `POWERBI_MCP_CACHE_DIR`, `POWERBI_MCP_TENANT_ID`, `POWERBI_MCP_CLIENT_ID`, and optional default workspace/semantic-model settings into the server.
 
 ## Claude Code Plugin
 
@@ -56,8 +56,15 @@ The server first tries silent token acquisition from the local MSAL cache. It al
 - `powerbi_auth_start`
 - `powerbi_auth_status`
 - `powerbi_auth_logout`
+- `powerbi_get_default_context`
+- `powerbi_set_context`
+- `powerbi_clear_context`
 - `powerbi_list_workspaces`
 - `powerbi_list_semantic_models`
+- `powerbi_get_semantic_model_schema`
+- `powerbi_generate_dax_query`
+- `powerbi_execute_dax_query`
+- `powerbi_get_report_metadata`
 
 If no cached token is available:
 
@@ -69,6 +76,34 @@ If no cached token is available:
 
 If chat-based sign-in is not convenient, run `npm run login` once from a normal terminal, then reconnect the MCP server.
 
+## Default Power BI Context
+
+Some Fabric MCP tools require a workspace ID or semantic model ID even when the endpoint does not advertise a tool that can list every available ID. In Claude Desktop settings, optionally configure one default workspace and one default semantic model:
+
+- Default workspace ID
+- Default workspace name
+- Default semantic model ID
+- Default semantic model name
+
+The extension uses these defaults only when a Fabric MCP tool requires a missing ID. Explicit IDs supplied in chat are preserved.
+
+You can also switch the active context inside a chat without changing Claude Desktop settings:
+
+- `powerbi_set_context` sets a chat-session workspace ID, semantic model ID, or display names.
+- `powerbi_clear_context` clears the chat-session override and returns to Claude Desktop settings.
+- `powerbi_get_default_context` shows the active context, chat override, and configured defaults.
+
+Context precedence is: explicit IDs in the current tool call, then chat-session context, then Claude Desktop settings.
+
+The query tools are local wrappers around Fabric MCP tools so Claude can discover them before sign-in:
+
+- `powerbi_get_semantic_model_schema` forwards to Fabric MCP `GetSemanticModelSchema`.
+- `powerbi_generate_dax_query` forwards to Fabric MCP `GenerateQuery`.
+- `powerbi_execute_dax_query` forwards to Fabric MCP `ExecuteQuery`.
+- `powerbi_get_report_metadata` forwards to Fabric MCP `GetReportMetadata`.
+
+The wrappers still require Microsoft sign-in and still route all Power BI operations through `https://api.fabric.microsoft.com/v1/mcp/powerbi`.
+
 ## Environment Variables
 
 | Variable | Default |
@@ -77,6 +112,10 @@ If chat-based sign-in is not convenient, run `npm run login` once from a normal 
 | `POWERBI_MCP_CLIENT_ID` | built-in public Power BI client ID |
 | `POWERBI_MCP_TENANT_ID` | `organizations` |
 | `POWERBI_MCP_SCOPES` | `https://analysis.windows.net/powerbi/api/.default` |
+| `POWERBI_MCP_DEFAULT_WORKSPACE_ID` | empty |
+| `POWERBI_MCP_DEFAULT_WORKSPACE_NAME` | empty |
+| `POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID` | empty |
+| `POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME` | empty |
 | `POWERBI_MCP_CACHE_DIR` | `~/.powerbi-mcp-claude`, or `${CLAUDE_PLUGIN_DATA}/cache` in Claude Code plugin mode |
 | `POWERBI_MCP_TIMEOUT_SECONDS` | `60` |
 | `POWERBI_MCP_DEVICE_CODE_TIMEOUT_SECONDS` | `900` |

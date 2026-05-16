@@ -20,6 +20,7 @@ import {
 } from "./jsonrpc.js";
 import {
   AUTH_TOOL_NAMES,
+  CONFIG_TOOL_NAMES,
   isLocalToolCall,
   mergeTools,
   POWERBI_TOOL_NAMES,
@@ -27,7 +28,13 @@ import {
   type LocalPowerBITools,
 } from "./localTools.js";
 import { RemoteMCPError, type RemoteForwarder } from "./remote.js";
-import { invokeRemotePowerBITool, signInRequiredResult } from "./remotePowerBITools.js";
+import {
+  applyDefaultArguments,
+  extractRemoteTools,
+  invokeRemotePowerBITool,
+  signInRequiredResult,
+  type RemoteTool,
+} from "./remotePowerBITools.js";
 import { log } from "./logger.js";
 import { VERSION } from "./version.js";
 
@@ -36,6 +43,14 @@ type PendingRequest = {
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
+
+type RemotePayloadPreparation =
+  | {
+      payload: JSONRPCPayload;
+    }
+  | {
+      response: JSONValue;
+    };
 
 const DEFAULT_CLIENT_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -46,6 +61,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
   private initializePayload: JSONRPCPayload | undefined;
   private initializedNotification: JSONRPCPayload | undefined;
   private remoteInitialized = false;
+  private remoteTools = new Map<string, RemoteTool>();
 
   constructor(
     private readonly remote: RemoteForwarder,
@@ -209,7 +225,13 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       }
 
       await this.ensureRemoteInitialized();
-      const response = await this.remote.forward(payload);
+      const prepared = await this.prepareRemotePayload(payload);
+      if ("response" in prepared) {
+        this.writePayload(prepared.response);
+        return;
+      }
+
+      const response = await this.remote.forward(prepared.payload);
       if (response !== null) {
         this.writeServerResponse(response);
       }
@@ -234,6 +256,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       try {
         await this.ensureRemoteInitialized();
         const remoteResponse = await this.remote.forward(payload);
+        this.captureRemoteTools(remoteResponse, requestId);
         return remoteResponse === null ? toolsListResult(requestId, localTools) : mergeTools(remoteResponse, localTools);
       } catch (error) {
         log(`Could not load upstream Power BI MCP tools; exposing local tools only: ${errorMessage(error)}`);
@@ -262,7 +285,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       throw new Error("Local Power BI tools are not configured.");
     }
 
-    if (AUTH_TOOL_NAMES.has(name)) {
+    if (AUTH_TOOL_NAMES.has(name) || CONFIG_TOOL_NAMES.has(name)) {
       return await this.localTools.handleToolCall(name, args);
     }
 
@@ -272,10 +295,75 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       }
 
       await this.ensureRemoteInitialized();
-      return await invokeRemotePowerBITool(this.remote, name, args);
+      return await invokeRemotePowerBITool(this.remote, name, args, this.localTools.defaultContext());
     }
 
     throw new Error(`Unknown local Power BI tool: ${name}`);
+  }
+
+  private async prepareRemotePayload(payload: JSONRPCPayload): Promise<RemotePayloadPreparation> {
+    if (Array.isArray(payload) || payload.method !== "tools/call" || !isObject(payload.params)) {
+      return { payload };
+    }
+
+    const name = payload.params.name;
+    if (typeof name !== "string") {
+      return { payload };
+    }
+
+    const args = isObject(payload.params.arguments) ? (payload.params.arguments as JSONObject) : {};
+    const tool = await this.remoteTool(name);
+    if (!tool || !this.localTools) {
+      return { payload };
+    }
+
+    const defaulted = applyDefaultArguments(tool, args, this.localTools.defaultContext());
+    if (defaulted.status === "missing") {
+      return {
+        response: {
+          jsonrpc: "2.0",
+          id: normalizeId(payload.id),
+          result: defaulted.result,
+        },
+      };
+    }
+
+    return {
+      payload: {
+        ...payload,
+        params: {
+          ...payload.params,
+          arguments: defaulted.arguments,
+        },
+      },
+    };
+  }
+
+  private async remoteTool(name: string): Promise<RemoteTool | undefined> {
+    const cached = this.remoteTools.get(name);
+    if (cached) {
+      return cached;
+    }
+
+    const id = `powerbi-tools-list-${Date.now()}-${this.nextServerRequestId++}`;
+    const response = await this.remote.forward({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/list",
+    });
+    this.captureRemoteTools(response, id);
+    return this.remoteTools.get(name);
+  }
+
+  private captureRemoteTools(response: JSONValue, id: JSONRPCId): void {
+    if (response === null) {
+      return;
+    }
+
+    const tools = extractRemoteTools(response, id);
+    for (const tool of tools) {
+      this.remoteTools.set(tool.name, tool);
+    }
   }
 
   private async ensureRemoteInitialized(): Promise<void> {

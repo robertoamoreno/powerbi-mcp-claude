@@ -14,6 +14,10 @@ export type ProxyConfig = {
   tenantId: string;
   authorityHost: string;
   scopes: string[];
+  defaultWorkspaceId?: string;
+  defaultWorkspaceName?: string;
+  defaultSemanticModelId?: string;
+  defaultSemanticModelName?: string;
   cacheDir: string;
   tokenCachePath: string;
   timeoutSeconds: number;
@@ -29,7 +33,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
     (env.CLAUDE_PLUGIN_DATA ? join(env.CLAUDE_PLUGIN_DATA, "cache") : join(homedir(), ".powerbi-mcp-claude"));
   const scopes = parseScopes(env.POWERBI_MCP_SCOPES);
 
-  return {
+  const config: ProxyConfig = {
     remoteUrl: env.POWERBI_MCP_URL ?? DEFAULT_REMOTE_URL,
     clientId: env.POWERBI_MCP_CLIENT_ID ?? DEFAULT_CLIENT_ID,
     tenantId: env.POWERBI_MCP_TENANT_ID ?? DEFAULT_TENANT_ID,
@@ -39,10 +43,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
     tokenCachePath: join(cacheDir, "msal_token_cache.json"),
     timeoutSeconds: parsePositiveNumber(env.POWERBI_MCP_TIMEOUT_SECONDS, 60),
     clientName: env.POWERBI_MCP_CLIENT_NAME ?? "powerbi-mcp-claude",
-    clientVersion: env.POWERBI_MCP_CLIENT_VERSION ?? "0.1.5",
+    clientVersion: env.POWERBI_MCP_CLIENT_VERSION ?? "0.1.8",
     allowInteractiveAuth: parseBool(env.POWERBI_MCP_ALLOW_INTERACTIVE_AUTH, true),
     deviceCodeTimeoutSeconds: parsePositiveNumber(env.POWERBI_MCP_DEVICE_CODE_TIMEOUT_SECONDS, 900),
   };
+
+  assignOptionalString(config, "defaultWorkspaceId", env.POWERBI_MCP_DEFAULT_WORKSPACE_ID);
+  assignOptionalString(config, "defaultWorkspaceName", env.POWERBI_MCP_DEFAULT_WORKSPACE_NAME);
+  assignOptionalString(config, "defaultSemanticModelId", env.POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID);
+  assignOptionalString(config, "defaultSemanticModelName", env.POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME);
+
+  return config;
 }
 
 export function authority(config: Pick<ProxyConfig, "authorityHost" | "tenantId">): string {
@@ -76,4 +87,15 @@ function parseBool(raw: string | undefined, fallback: boolean): boolean {
   }
 
   return !["0", "false", "no", "off"].includes(raw.trim().toLowerCase());
+}
+
+function assignOptionalString<T extends object, K extends keyof T & string>(
+  target: T,
+  key: K,
+  raw: string | undefined,
+): void {
+  const value = raw?.trim();
+  if (value) {
+    target[key] = value as T[K];
+  }
 }

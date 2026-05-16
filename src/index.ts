@@ -66,9 +66,12 @@ async function main(): Promise<number> {
   log(`Remote Power BI MCP URL: ${config.remoteUrl}`);
   log(`MSAL authority: ${authority(config)}`);
   log(`Token cache: ${config.tokenCachePath}`);
+  log(
+    `Default Power BI context: workspace=${config.defaultWorkspaceId ?? "not configured"}, semanticModel=${config.defaultSemanticModelId ?? "not configured"}`,
+  );
 
   const remote = new RemoteMCPClient(config, auth);
-  const localTools = new LocalPowerBITools(auth);
+  const localTools = new LocalPowerBITools(auth, config);
   transport = new MCPProxyTransport(remote, makeStdoutWriter(process.stdout), localTools);
   await transport.run(process.stdin);
   return 0;
@@ -97,6 +100,10 @@ Environment:
   POWERBI_MCP_CLIENT_ID
   POWERBI_MCP_TENANT_ID
   POWERBI_MCP_SCOPES
+  POWERBI_MCP_DEFAULT_WORKSPACE_ID
+  POWERBI_MCP_DEFAULT_WORKSPACE_NAME
+  POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID
+  POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME
   POWERBI_MCP_CACHE_DIR
   POWERBI_MCP_TIMEOUT_SECONDS
   POWERBI_MCP_ALLOW_INTERACTIVE_AUTH

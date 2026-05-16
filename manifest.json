@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "powerbi-mcp-claude",
   "display_name": "Power BI MCP for Claude",
-  "version": "0.1.5",
+  "version": "0.1.8",
   "description": "Claude Desktop extension for Power BI workspaces, semantic models, and Microsoft device-code sign-in.",
   "long_description": "Provides Claude Desktop access to Power BI through stable local wrapper tools and Microsoft's remote Fabric Power BI MCP endpoint. When sign-in is needed, the server returns the Microsoft URL and device code in chat instead of requiring users to inspect terminal logs.",
   "author": {
@@ -23,7 +23,11 @@
         "POWERBI_MCP_CACHE_DIR": "${HOME}/.powerbi-mcp-claude",
         "POWERBI_MCP_ALLOW_INTERACTIVE_AUTH": "true",
         "POWERBI_MCP_TENANT_ID": "${user_config.tenant_id}",
-        "POWERBI_MCP_CLIENT_ID": "${user_config.client_id}"
+        "POWERBI_MCP_CLIENT_ID": "${user_config.client_id}",
+        "POWERBI_MCP_DEFAULT_WORKSPACE_ID": "${user_config.default_workspace_id}",
+        "POWERBI_MCP_DEFAULT_WORKSPACE_NAME": "${user_config.default_workspace_name}",
+        "POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID": "${user_config.default_semantic_model_id}",
+        "POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME": "${user_config.default_semantic_model_name}"
       }
     }
   },
@@ -50,6 +54,34 @@
       "description": "Use the default Power BI public client, or provide your own public-client app registration.",
       "default": "ea0616ba-638b-4df5-95b9-636659ae5121",
       "required": true
+    },
+    "default_workspace_id": {
+      "type": "string",
+      "title": "Default Power BI workspace ID",
+      "description": "Optional workspace ID to use when Fabric MCP tools require a workspace ID and cannot list workspaces.",
+      "default": "",
+      "required": false
+    },
+    "default_workspace_name": {
+      "type": "string",
+      "title": "Default Power BI workspace name",
+      "description": "Optional display name for the configured default workspace.",
+      "default": "",
+      "required": false
+    },
+    "default_semantic_model_id": {
+      "type": "string",
+      "title": "Default Power BI semantic model ID",
+      "description": "Optional semantic model, dataset, or artifact ID to use when Fabric MCP tools require a semantic model ID.",
+      "default": "",
+      "required": false
+    },
+    "default_semantic_model_name": {
+      "type": "string",
+      "title": "Default Power BI semantic model name",
+      "description": "Optional display name for the configured default semantic model.",
+      "default": "",
+      "required": false
     }
   }
 }
