@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "powerbi-mcp-claude",
   "display_name": "Power BI MCP for Claude",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Claude Desktop extension for Power BI workspaces, semantic models, and Microsoft device-code sign-in.",
   "long_description": "Provides Claude Desktop access to Power BI through stable local wrapper tools and Microsoft's remote Fabric Power BI MCP endpoint. When sign-in is needed, the server returns the Microsoft URL and device code in chat instead of requiring users to inspect terminal logs.",
   "author": {

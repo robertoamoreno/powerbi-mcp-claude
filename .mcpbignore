@@ -11,4 +11,5 @@ node_modules/undici-types/
 .git/
 .gitignore
 *.mcpb
+*.mcpb.zip
 .env

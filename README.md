@@ -56,6 +56,7 @@ The server first tries silent token acquisition from the local MSAL cache. It al
 - `powerbi_auth_start`
 - `powerbi_auth_status`
 - `powerbi_auth_logout`
+- `powerbi_diagnostics`
 - `powerbi_get_default_context`
 - `powerbi_set_context`
 - `powerbi_clear_context`
@@ -75,6 +76,12 @@ If no cached token is available:
 5. Later requests, including workspace and semantic-model listing, refresh silently when possible and are sent to the Fabric MCP endpoint.
 
 If chat-based sign-in is not convenient, run `npm run login` once from a normal terminal, then reconnect the MCP server.
+
+## Diagnostics
+
+Use `powerbi_diagnostics` when Claude needs to verify whether the extension is healthy. It returns redacted status for the server version, authentication state, active/default context presence, local wrapper tools, and upstream Fabric MCP query tool discovery.
+
+Diagnostics output intentionally omits tokens, auth headers, account email, cache paths, and raw workspace or semantic model IDs.
 
 ## Default Power BI Context
 

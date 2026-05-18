@@ -5,7 +5,7 @@ import type { DeviceCodeResponse } from "@azure/msal-common/node";
 import { normalizeId, type JSONObject, type JSONRPCPayload, type JSONValue } from "../src/jsonrpc.js";
 import { LocalPowerBITools } from "../src/localTools.js";
 import type { RemoteForwarder } from "../src/remote.js";
-import { parseSsePayload } from "../src/remote.js";
+import { parseSsePayload, RemoteMCPError } from "../src/remote.js";
 import { applyDefaultArguments, type RemoteTool } from "../src/remotePowerBITools.js";
 import { MCPProxyTransport } from "../src/transport.js";
 
@@ -177,6 +177,7 @@ test("tools/list exposes Power BI domain tools before authentication", async () 
   assert.ok(Array.isArray(result.tools));
   const toolNames = result.tools.map((tool) => asObject(tool).name);
   assert.ok(toolNames.includes("powerbi_auth_start"));
+  assert.ok(toolNames.includes("powerbi_diagnostics"));
   assert.ok(toolNames.includes("powerbi_get_default_context"));
   assert.ok(toolNames.includes("powerbi_set_context"));
   assert.ok(toolNames.includes("powerbi_clear_context"));
@@ -186,6 +187,268 @@ test("tools/list exposes Power BI domain tools before authentication", async () 
   assert.ok(toolNames.includes("powerbi_generate_dax_query"));
   assert.ok(toolNames.includes("powerbi_execute_dax_query"));
   assert.ok(toolNames.includes("powerbi_get_report_metadata"));
+});
+
+test("diagnostics are available before authentication and do not call upstream tools", async () => {
+  const written: JSONValue[] = [];
+  const forwarded: JSONRPCPayload[] = [];
+  const localTools = new LocalPowerBITools({
+    async getCachedAccessToken(): Promise<undefined> {
+      return undefined;
+    },
+    async deviceLoginStatus() {
+      return {
+        status: "not_started",
+        authenticated: false,
+        message: "Microsoft authentication has not been started.",
+      };
+    },
+    async tokenInfo() {
+      return {
+        cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+        cacheExists: false,
+        accountCount: 0,
+        usernames: [],
+      };
+    },
+  } as never);
+
+  const transport = new MCPProxyTransport(
+    {
+      async forward(payload: JSONRPCPayload): Promise<JSONValue> {
+        forwarded.push(payload);
+        throw new Error("Diagnostics should not call upstream tools before auth.");
+      },
+    },
+    (payload) => written.push(payload),
+    localTools,
+  );
+
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 0,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+    },
+  });
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 20,
+    method: "tools/call",
+    params: {
+      name: "powerbi_diagnostics",
+      arguments: {},
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(forwarded.length, 0);
+  const response = asObject(written.find((payload) => isJsonObject(payload) && payload.id === 20));
+  const result = asObject(response.result);
+  const diagnostics = diagnosticsFromResult(result);
+  const auth = asObject(diagnostics.auth);
+  const upstream = asObject(diagnostics.upstream);
+  assert.equal(auth.status, "not_started");
+  assert.equal(auth.authenticated, false);
+  assert.equal(upstream.status, "skipped_auth_required");
+  assert.doesNotMatch(JSON.stringify(response), /roberto@place\.com|msal_token_cache|Bearer/i);
+});
+
+test("diagnostics report upstream Fabric query tool availability after authentication", async () => {
+  const written: JSONValue[] = [];
+  const forwarded: JSONRPCPayload[] = [];
+  const workspaceId = "9ab4f785-e3d4-4b31-acab-e53cc692cd1d";
+  const semanticModelId = "3a2376ec-f9b5-44b6-9b6e-c6a2dd6941f8";
+  const localTools = new LocalPowerBITools(
+    {
+      async getCachedAccessToken(): Promise<string> {
+        return "cached-token";
+      },
+      async deviceLoginStatus() {
+        return {
+          status: "authenticated",
+          authenticated: true,
+          username: "roberto@place.com",
+          message: "Authenticated with Microsoft as roberto@place.com.",
+        };
+      },
+      async tokenInfo() {
+        return {
+          cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+          cacheExists: true,
+          accountCount: 1,
+          usernames: ["roberto@place.com"],
+        };
+      },
+    } as never,
+    {
+      remoteUrl: "https://api.fabric.microsoft.com/v1/mcp/powerbi",
+      defaultWorkspaceId: workspaceId,
+      defaultSemanticModelId: semanticModelId,
+    },
+  );
+
+  const transport = new MCPProxyTransport(
+    {
+      async forward(payload: JSONRPCPayload): Promise<JSONValue> {
+        forwarded.push(payload);
+        if (!Array.isArray(payload) && payload.method === "initialize") {
+          return {
+            jsonrpc: "2.0",
+            id: normalizeId(payload.id),
+            result: {
+              capabilities: {
+                tools: {},
+              },
+            },
+          };
+        }
+        if (!Array.isArray(payload) && payload.method === "tools/list") {
+          return queryTools(payload);
+        }
+        return null;
+      },
+    },
+    (payload) => written.push(payload),
+    localTools,
+  );
+
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 0,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+    },
+  });
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 21,
+    method: "tools/call",
+    params: {
+      name: "powerbi_diagnostics",
+      arguments: {},
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    forwarded.some((payload) => !Array.isArray(payload) && payload.method === "tools/list"),
+    true,
+  );
+  const response = asObject(written.find((payload) => isJsonObject(payload) && payload.id === 21));
+  const result = asObject(response.result);
+  const diagnostics = diagnosticsFromResult(result);
+  const auth = asObject(diagnostics.auth);
+  const context = asObject(diagnostics.context);
+  const endpoint = asObject(diagnostics.endpoint);
+  const upstream = asObject(diagnostics.upstream);
+  const capabilities = asObject(upstream.expectedCapabilities);
+  assert.equal(auth.authenticated, true);
+  assert.equal(endpoint.looksLikeFabricPowerBI, true);
+  assert.equal(context.activeWorkspaceConfigured, true);
+  assert.equal(context.activeSemanticModelConfigured, true);
+  assert.equal(upstream.status, "ok");
+  assert.equal(capabilities.ExecuteQuery, true);
+  assert.equal(capabilities.GetSemanticModelSchema, true);
+  assert.equal(capabilities.GenerateQuery, true);
+  assert.equal(capabilities.GetReportMetadata, true);
+  const serialized = JSON.stringify(response);
+  assert.doesNotMatch(serialized, new RegExp(workspaceId));
+  assert.doesNotMatch(serialized, new RegExp(semanticModelId));
+  assert.doesNotMatch(serialized, /roberto@place\.com|msal_token_cache|cached-token|Bearer/i);
+});
+
+test("diagnostics report upstream discovery failures without leaking details", async () => {
+  const written: JSONValue[] = [];
+  const localTools = new LocalPowerBITools(
+    {
+      async getCachedAccessToken(): Promise<string> {
+        return "cached-token";
+      },
+      async deviceLoginStatus() {
+        return {
+          status: "authenticated",
+          authenticated: true,
+          username: "roberto@place.com",
+          message: "Authenticated with Microsoft as roberto@place.com.",
+        };
+      },
+      async tokenInfo() {
+        return {
+          cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+          cacheExists: true,
+          accountCount: 1,
+          usernames: ["roberto@place.com"],
+        };
+      },
+    } as never,
+    {
+      remoteUrl: "https://api.fabric.microsoft.com/v1/mcp/powerbi",
+      defaultSemanticModelId: "3a2376ec-f9b5-44b6-9b6e-c6a2dd6941f8",
+    },
+  );
+
+  const transport = new MCPProxyTransport(
+    {
+      async forward(payload: JSONRPCPayload): Promise<JSONValue> {
+        if (!Array.isArray(payload) && payload.method === "initialize") {
+          return {
+            jsonrpc: "2.0",
+            id: normalizeId(payload.id),
+            result: {
+              capabilities: {
+                tools: {},
+              },
+            },
+          };
+        }
+        if (!Array.isArray(payload) && payload.method === "tools/list") {
+          throw new RemoteMCPError(
+            "sensitive roberto@place.com /Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+            -32000,
+            503,
+          );
+        }
+        return null;
+      },
+    },
+    (payload) => written.push(payload),
+    localTools,
+  );
+
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 0,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+    },
+  });
+  transport.handleIncoming({
+    jsonrpc: "2.0",
+    id: 22,
+    method: "tools/call",
+    params: {
+      name: "powerbi_diagnostics",
+      arguments: {},
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const response = asObject(written.find((payload) => isJsonObject(payload) && payload.id === 22));
+  const diagnostics = diagnosticsFromResult(asObject(response.result));
+  const upstream = asObject(diagnostics.upstream);
+  assert.equal(upstream.status, "failed");
+  assert.equal(upstream.error, "Remote MCP HTTP 503");
+  assert.doesNotMatch(JSON.stringify(response), /roberto@place\.com|msal_token_cache|cached-token|Bearer|sensitive/i);
 });
 
 test("local Power BI wrapper tools invoke upstream Fabric MCP tools", async () => {
@@ -1147,6 +1410,11 @@ function asObject(value: JSONValue | undefined): JSONObject {
 
 function isJsonObject(value: unknown): value is JSONObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function diagnosticsFromResult(result: JSONObject): JSONObject {
+  const structuredContent = asObject(result.structuredContent);
+  return asObject(structuredContent.diagnostics);
 }
 
 function semanticSchemaTools(payload: JSONObject): JSONObject {

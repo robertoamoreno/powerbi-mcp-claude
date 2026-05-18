@@ -2,6 +2,7 @@ node_modules/
 dist/
 .claude-plugin-cache/
 *.mcpb
+*.mcpb.zip
 *.log
 .env
 .DS_Store

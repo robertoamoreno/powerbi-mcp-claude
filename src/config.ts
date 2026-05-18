@@ -43,7 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
     tokenCachePath: join(cacheDir, "msal_token_cache.json"),
     timeoutSeconds: parsePositiveNumber(env.POWERBI_MCP_TIMEOUT_SECONDS, 60),
     clientName: env.POWERBI_MCP_CLIENT_NAME ?? "powerbi-mcp-claude",
-    clientVersion: env.POWERBI_MCP_CLIENT_VERSION ?? "0.1.8",
+    clientVersion: env.POWERBI_MCP_CLIENT_VERSION ?? "0.1.9",
     allowInteractiveAuth: parseBool(env.POWERBI_MCP_ALLOW_INTERACTIVE_AUTH, true),
     deviceCodeTimeoutSeconds: parsePositiveNumber(env.POWERBI_MCP_DEVICE_CODE_TIMEOUT_SECONDS, 900),
   };

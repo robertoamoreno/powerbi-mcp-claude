@@ -1,6 +1,6 @@
 {
   "name": "powerbi-mcp-claude",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Claude-ready local MCP proxy for Microsoft Power BI's remote MCP endpoint.",
   "type": "module",
   "bin": {

@@ -9,6 +9,7 @@ export const AUTH_TOOL_NAMES = new Set([
 ]);
 
 export const CONFIG_TOOL_NAMES = new Set([
+  "powerbi_diagnostics",
   "powerbi_get_default_context",
   "powerbi_set_context",
   "powerbi_clear_context",
@@ -37,9 +38,11 @@ export class LocalPowerBITools {
 
   constructor(
     private readonly auth: AuthManager,
-    private readonly config: Pick<
-      ProxyConfig,
-      "defaultWorkspaceId" | "defaultWorkspaceName" | "defaultSemanticModelId" | "defaultSemanticModelName"
+    private readonly config: Partial<
+      Pick<
+        ProxyConfig,
+        "remoteUrl" | "defaultWorkspaceId" | "defaultWorkspaceName" | "defaultSemanticModelId" | "defaultSemanticModelName"
+      >
     > = {},
   ) {}
 
@@ -47,8 +50,38 @@ export class LocalPowerBITools {
     return (await this.auth.getCachedAccessToken()) !== undefined;
   }
 
+  async diagnosticAuthStatus(): Promise<JSONObject> {
+    const status = await this.auth.deviceLoginStatus();
+    const info = await this.auth.tokenInfo();
+    return {
+      status: status.status,
+      authenticated: status.authenticated,
+      tokenCacheExists: info.cacheExists,
+      cachedAccountCount: info.accountCount,
+    };
+  }
+
   defaultContext(): PowerBIDefaultContext {
     return mergeContexts(this.configuredContext(), this.chatContext);
+  }
+
+  diagnosticSnapshot(): JSONObject {
+    const activeContext = this.defaultContext();
+    const configuredContext = this.configuredContext();
+    return {
+      remoteEndpointConfigured: Boolean(this.config.remoteUrl),
+      remoteEndpointLooksLikeFabricPowerBI: looksLikeFabricPowerBIEndpoint(this.config.remoteUrl),
+      context: {
+        activeWorkspaceConfigured: Boolean(activeContext.workspaceId),
+        activeSemanticModelConfigured: Boolean(activeContext.semanticModelId),
+        chatWorkspaceOverrideConfigured: Boolean(this.chatContext.workspaceId),
+        chatSemanticModelOverrideConfigured: Boolean(this.chatContext.semanticModelId),
+        defaultWorkspaceConfigured: Boolean(configuredContext.workspaceId),
+        defaultSemanticModelConfigured: Boolean(configuredContext.semanticModelId),
+        activeWorkspaceNameConfigured: Boolean(activeContext.workspaceName),
+        activeSemanticModelNameConfigured: Boolean(activeContext.semanticModelName),
+      },
+    };
   }
 
   private configuredContext(): PowerBIDefaultContext {
@@ -95,6 +128,17 @@ export class LocalPowerBITools {
         name: "powerbi_auth_logout",
         title: "Sign out of Power BI",
         description: "Delete the local Microsoft token cache used by this Power BI MCP extension.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "powerbi_diagnostics",
+        title: "Run Power BI diagnostics",
+        description:
+          "Run redacted diagnostics for this Power BI MCP extension, including auth, context, local wrapper tools, and upstream Fabric MCP tool discovery.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -549,4 +593,17 @@ function structuredContext(context: PowerBIDefaultContext): JSONObject {
     semanticModelId: context.semanticModelId ?? null,
     semanticModelName: context.semanticModelName ?? null,
   };
+}
+
+function looksLikeFabricPowerBIEndpoint(rawUrl: string | undefined): boolean {
+  if (!rawUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname === "api.fabric.microsoft.com" && url.pathname.replace(/\/+$/, "") === "/v1/mcp/powerbi";
+  } catch {
+    return false;
+  }
 }

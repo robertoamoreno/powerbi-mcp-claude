@@ -53,6 +53,27 @@ type RemotePayloadPreparation =
     };
 
 const DEFAULT_CLIENT_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+const EXPECTED_FABRIC_QUERY_TOOLS = [
+  "ExecuteQuery",
+  "GetSemanticModelSchema",
+  "GenerateQuery",
+  "GetReportMetadata",
+] as const;
+const EXPECTED_LOCAL_WRAPPER_TOOLS = [
+  "powerbi_auth_start",
+  "powerbi_auth_status",
+  "powerbi_auth_logout",
+  "powerbi_diagnostics",
+  "powerbi_get_default_context",
+  "powerbi_set_context",
+  "powerbi_clear_context",
+  "powerbi_list_workspaces",
+  "powerbi_list_semantic_models",
+  "powerbi_get_semantic_model_schema",
+  "powerbi_generate_dax_query",
+  "powerbi_execute_dax_query",
+  "powerbi_get_report_metadata",
+] as const;
 
 export class MCPProxyTransport implements DeviceCodePrompter {
   private nextServerRequestId = 1;
@@ -285,6 +306,10 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       throw new Error("Local Power BI tools are not configured.");
     }
 
+    if (name === "powerbi_diagnostics") {
+      return await this.powerBIDiagnostics();
+    }
+
     if (AUTH_TOOL_NAMES.has(name) || CONFIG_TOOL_NAMES.has(name)) {
       return await this.localTools.handleToolCall(name, args);
     }
@@ -299,6 +324,69 @@ export class MCPProxyTransport implements DeviceCodePrompter {
     }
 
     throw new Error(`Unknown local Power BI tool: ${name}`);
+  }
+
+  private async powerBIDiagnostics(): Promise<JSONObject> {
+    if (!this.localTools) {
+      throw new Error("Local Power BI tools are not configured.");
+    }
+
+    const auth = await this.localTools.diagnosticAuthStatus();
+    const context = this.localTools.diagnosticSnapshot();
+    const localToolNames = this.localTools.tools()
+      .map((tool) => tool.name)
+      .filter((name): name is string => typeof name === "string");
+    const upstream = await this.upstreamDiagnostics(auth.authenticated === true);
+
+    return diagnosticsResult({
+      auth,
+      context,
+      local: {
+        toolCount: localToolNames.length,
+        expectedCapabilities: toolAvailability(EXPECTED_LOCAL_WRAPPER_TOOLS, new Set(localToolNames)),
+      },
+      upstream,
+    });
+  }
+
+  private async upstreamDiagnostics(authenticated: boolean): Promise<JSONObject> {
+    if (!authenticated) {
+      return {
+        checked: false,
+        status: "skipped_auth_required",
+        advertisedToolCount: 0,
+        expectedCapabilities: toolAvailability(EXPECTED_FABRIC_QUERY_TOOLS, new Set()),
+      };
+    }
+
+    try {
+      await this.ensureRemoteInitialized();
+      const id = `powerbi-diagnostics-tools-list-${Date.now()}-${this.nextServerRequestId++}`;
+      const response = await this.remote.forward({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/list",
+      });
+      this.captureRemoteTools(response, id);
+
+      const tools = extractRemoteTools(response, id);
+      const toolNames = new Set(tools.map((tool) => tool.name));
+      return {
+        checked: true,
+        status: "ok",
+        advertisedToolCount: tools.length,
+        expectedCapabilities: toolAvailability(EXPECTED_FABRIC_QUERY_TOOLS, toolNames),
+      };
+    } catch (error) {
+      log(`Power BI diagnostics could not list upstream Fabric MCP tools: ${redactedRemoteError(error)}`);
+      return {
+        checked: true,
+        status: "failed",
+        error: redactedRemoteError(error),
+        advertisedToolCount: 0,
+        expectedCapabilities: toolAvailability(EXPECTED_FABRIC_QUERY_TOOLS, new Set()),
+      };
+    }
   }
 
   private async prepareRemotePayload(payload: JSONRPCPayload): Promise<RemotePayloadPreparation> {
@@ -480,6 +568,80 @@ export function makeStdoutWriter(output: Writable): (payload: JSONValue) => void
   return (payload: JSONValue): void => {
     output.write(`${JSON.stringify(payload)}\n`);
   };
+}
+
+type DiagnosticsResultInput = {
+  auth: JSONObject;
+  context: JSONObject;
+  local: JSONObject;
+  upstream: JSONObject;
+};
+
+function diagnosticsResult(input: DiagnosticsResultInput): JSONObject {
+  const context = isObject(input.context.context) ? input.context.context : {};
+  const localCapabilities = isObject(input.local.expectedCapabilities) ? input.local.expectedCapabilities : {};
+  const upstreamCapabilities = isObject(input.upstream.expectedCapabilities) ? input.upstream.expectedCapabilities : {};
+  const upstreamError = typeof input.upstream.error === "string" ? ` (${input.upstream.error})` : "";
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: [
+          "Power BI MCP diagnostics (redacted):",
+          `Server version: ${VERSION}`,
+          `Auth: ${String(input.auth.status ?? "unknown")} (authenticated: ${yesNo(input.auth.authenticated)}, cached accounts: ${numberText(input.auth.cachedAccountCount)}, token cache present: ${yesNo(input.auth.tokenCacheExists)})`,
+          `Endpoint: configured: ${yesNo(input.context.remoteEndpointConfigured)}, Fabric Power BI MCP endpoint: ${yesNo(input.context.remoteEndpointLooksLikeFabricPowerBI)}`,
+          `Context: active workspace: ${yesNo(context.activeWorkspaceConfigured)}, active semantic model: ${yesNo(context.activeSemanticModelConfigured)}, chat workspace override: ${yesNo(context.chatWorkspaceOverrideConfigured)}, chat semantic model override: ${yesNo(context.chatSemanticModelOverrideConfigured)}, default workspace: ${yesNo(context.defaultWorkspaceConfigured)}, default semantic model: ${yesNo(context.defaultSemanticModelConfigured)}`,
+          `Local wrappers: ${numberText(input.local.toolCount)} tools; ${capabilitySummary(localCapabilities, EXPECTED_LOCAL_WRAPPER_TOOLS)}`,
+          `Upstream Fabric tools: ${String(input.upstream.status ?? "unknown")}${upstreamError}; checked: ${yesNo(input.upstream.checked)}, advertised tools: ${numberText(input.upstream.advertisedToolCount)}; ${capabilitySummary(upstreamCapabilities, EXPECTED_FABRIC_QUERY_TOOLS)}`,
+          "Privacy: redacted output omits tokens, auth headers, account email, cache path, and raw workspace or semantic model IDs.",
+        ].join("\n"),
+      },
+    ],
+    structuredContent: {
+      diagnostics: {
+        version: VERSION,
+        redacted: true,
+        auth: input.auth,
+        endpoint: {
+          configured: input.context.remoteEndpointConfigured === true,
+          looksLikeFabricPowerBI: input.context.remoteEndpointLooksLikeFabricPowerBI === true,
+        },
+        context,
+        local: input.local,
+        upstream: input.upstream,
+      },
+    },
+  };
+}
+
+function toolAvailability(names: readonly string[], available: Set<string>): JSONObject {
+  const capabilities: JSONObject = {};
+  for (const name of names) {
+    capabilities[name] = available.has(name);
+  }
+  return capabilities;
+}
+
+function capabilitySummary(capabilities: Record<string, unknown>, names: readonly string[]): string {
+  return names.map((name) => `${name}: ${yesNo(capabilities[name])}`).join(", ");
+}
+
+function yesNo(value: unknown): string {
+  return value === true ? "yes" : "no";
+}
+
+function numberText(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "unknown";
+}
+
+function redactedRemoteError(error: unknown): string {
+  if (error instanceof RemoteMCPError) {
+    return error.httpStatus ? `Remote MCP HTTP ${error.httpStatus}` : "Remote MCP error";
+  }
+
+  return "Remote tool discovery failed";
 }
 
 function isServerMessage(value: unknown): value is JSONValue {
