@@ -1,5 +1,11 @@
 # Power BI MCP for Claude
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)](https://www.typescriptlang.org/)
+[![MCP](https://img.shields.io/badge/MCP-Power%20BI%20%2B%20Fabric-111827.svg)](https://modelcontextprotocol.io/)
+
+Claude Desktop and Claude Code MCP server for Microsoft Power BI and Fabric. It supports Microsoft device-code sign-in, Power BI workspace and semantic model discovery, active semantic model context, DAX query generation/execution, schema metadata, report metadata, and redacted diagnostics.
+
 Local Node/TypeScript MCP proxy for Claude. It forwards JSON-RPC messages to Microsoft's remote Power BI MCP endpoint, exposes stable local wrapper tools for Claude discovery, and acquires delegated Microsoft Entra ID tokens with MSAL device-code authentication.
 
 The key difference from a terminal-only proxy is that first-time sign-in can happen from Claude chat. If Claude advertises MCP URL-mode elicitation, the server uses it. Claude Desktop currently starts this extension with MCP Apps UI capabilities instead, so the server also exposes local auth tools that return the Microsoft URL and device code directly in chat.
@@ -11,6 +17,16 @@ https://api.fabric.microsoft.com/v1/mcp/powerbi
 ```
 
 Power BI data access goes through this Fabric MCP endpoint. The local tools only handle sign-in and provide stable wrapper names for Claude Desktop to call.
+
+## Features
+
+- Claude Desktop MCPB extension and Claude Code plugin support.
+- Microsoft Entra ID device-code authentication through MSAL.
+- Power BI workspace and semantic model discovery wrappers.
+- Default and chat-scoped workspace/semantic model context.
+- Fabric MCP wrappers for semantic model schema, DAX query generation, DAX execution, and report metadata.
+- Redacted diagnostics for auth, context, local wrapper tools, and upstream Fabric MCP tool discovery.
+- Fabric-only routing through `https://api.fabric.microsoft.com/v1/mcp/powerbi`.
 
 ## Install
 

@@ -1,7 +1,7 @@
 {
   "name": "powerbi-mcp-claude",
   "version": "0.1.9",
-  "description": "Claude-ready local MCP proxy for Microsoft Power BI's remote MCP endpoint.",
+  "description": "Claude Desktop and Claude Code MCP server for Microsoft Power BI and Fabric semantic models, DAX queries, and diagnostics.",
   "type": "module",
   "bin": {
     "powerbi-mcp-claude": "dist/src/index.js"
@@ -30,15 +30,33 @@
   },
   "keywords": [
     "claude",
+    "claude-desktop",
+    "claude-code",
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
     "powerbi",
+    "power-bi",
     "fabric",
+    "microsoft-fabric",
+    "semantic-model",
+    "dax",
+    "business-intelligence",
+    "analytics",
     "mcpb"
   ],
   "author": {
     "name": "Roberto Moreno"
   },
   "license": "MIT",
+  "homepage": "https://github.com/robertoamoreno/powerbi-mcp-claude#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robertoamoreno/powerbi-mcp-claude.git"
+  },
+  "bugs": {
+    "url": "https://github.com/robertoamoreno/powerbi-mcp-claude/issues"
+  },
   "dependencies": {
     "@azure/msal-node": "^5.2.1"
   },
