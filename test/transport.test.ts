@@ -205,7 +205,7 @@ test("diagnostics are available before authentication and do not call upstream t
     },
     async tokenInfo() {
       return {
-        cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+        cachePath: "/tmp/powerbi-mcp-claude/msal_token_cache.json",
         cacheExists: false,
         accountCount: 0,
         usernames: [],
@@ -254,14 +254,14 @@ test("diagnostics are available before authentication and do not call upstream t
   assert.equal(auth.status, "not_started");
   assert.equal(auth.authenticated, false);
   assert.equal(upstream.status, "skipped_auth_required");
-  assert.doesNotMatch(JSON.stringify(response), /roberto@place\.com|msal_token_cache|Bearer/i);
+  assert.doesNotMatch(JSON.stringify(response), /user@example\.com|msal_token_cache|Bearer/i);
 });
 
 test("diagnostics report upstream Fabric query tool availability after authentication", async () => {
   const written: JSONValue[] = [];
   const forwarded: JSONRPCPayload[] = [];
-  const workspaceId = "9ab4f785-e3d4-4b31-acab-e53cc692cd1d";
-  const semanticModelId = "3a2376ec-f9b5-44b6-9b6e-c6a2dd6941f8";
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  const semanticModelId = "00000000-0000-0000-0000-000000000002";
   const localTools = new LocalPowerBITools(
     {
       async getCachedAccessToken(): Promise<string> {
@@ -271,16 +271,16 @@ test("diagnostics report upstream Fabric query tool availability after authentic
         return {
           status: "authenticated",
           authenticated: true,
-          username: "roberto@place.com",
-          message: "Authenticated with Microsoft as roberto@place.com.",
+          username: "user.com",
+          message: "Authenticated with Microsoft as user.com.",
         };
       },
       async tokenInfo() {
         return {
-          cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+          cachePath: "/tmp/powerbi-mcp-claude/msal_token_cache.json",
           cacheExists: true,
           accountCount: 1,
-          usernames: ["roberto@place.com"],
+          usernames: ["user.com"],
         };
       },
     } as never,
@@ -361,7 +361,7 @@ test("diagnostics report upstream Fabric query tool availability after authentic
   const serialized = JSON.stringify(response);
   assert.doesNotMatch(serialized, new RegExp(workspaceId));
   assert.doesNotMatch(serialized, new RegExp(semanticModelId));
-  assert.doesNotMatch(serialized, /roberto@place\.com|msal_token_cache|cached-token|Bearer/i);
+  assert.doesNotMatch(serialized, /user@example\.com|msal_token_cache|cached-token|Bearer/i);
 });
 
 test("diagnostics report upstream discovery failures without leaking details", async () => {
@@ -375,22 +375,22 @@ test("diagnostics report upstream discovery failures without leaking details", a
         return {
           status: "authenticated",
           authenticated: true,
-          username: "roberto@place.com",
-          message: "Authenticated with Microsoft as roberto@place.com.",
+          username: "user.com",
+          message: "Authenticated with Microsoft as user.com.",
         };
       },
       async tokenInfo() {
         return {
-          cachePath: "/Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+          cachePath: "/tmp/powerbi-mcp-claude/msal_token_cache.json",
           cacheExists: true,
           accountCount: 1,
-          usernames: ["roberto@place.com"],
+          usernames: ["user.com"],
         };
       },
     } as never,
     {
       remoteUrl: "https://api.fabric.microsoft.com/v1/mcp/powerbi",
-      defaultSemanticModelId: "3a2376ec-f9b5-44b6-9b6e-c6a2dd6941f8",
+      defaultSemanticModelId: "00000000-0000-0000-0000-000000000002",
     },
   );
 
@@ -410,7 +410,7 @@ test("diagnostics report upstream discovery failures without leaking details", a
         }
         if (!Array.isArray(payload) && payload.method === "tools/list") {
           throw new RemoteMCPError(
-            "sensitive roberto@place.com /Users/robertomoreno/.powerbi-mcp-claude/msal_token_cache.json",
+            "sensitive user.com /tmp/powerbi-mcp-claude/msal_token_cache.json",
             -32000,
             503,
           );
@@ -448,7 +448,7 @@ test("diagnostics report upstream discovery failures without leaking details", a
   const upstream = asObject(diagnostics.upstream);
   assert.equal(upstream.status, "failed");
   assert.equal(upstream.error, "Remote MCP HTTP 503");
-  assert.doesNotMatch(JSON.stringify(response), /roberto@place\.com|msal_token_cache|cached-token|Bearer|sensitive/i);
+  assert.doesNotMatch(JSON.stringify(response), /user@example\.com|msal_token_cache|cached-token|Bearer|sensitive/i);
 });
 
 test("local Power BI wrapper tools invoke upstream Fabric MCP tools", async () => {

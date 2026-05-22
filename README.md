@@ -46,7 +46,7 @@ The `.claude-plugin/plugin.json`, `.mcp.json`, and `skills/powerbi/SKILL.md` fil
 
 ```bash
 npm run build
-claude --plugin-dir /Users/robertomoreno/Documents/Power-BI-MCP-Node
+claude --plugin-dir /path/to/Power-BI-MCP-Node
 ```
 
 ## Authentication UX
