@@ -1,0 +1,43 @@
+services:
+  powerbi-mcp:
+    build:
+      context: .
+    image: powerbi-mcp-claude:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PORT: "3000"
+      POWERBI_MCP_CACHE_DIR: /data/powerbi-mcp-claude
+      POWERBI_MCP_TENANT_ID: ${POWERBI_MCP_TENANT_ID:-organizations}
+      POWERBI_MCP_HTTP_SESSION_TTL_SECONDS: ${POWERBI_MCP_HTTP_SESSION_TTL_SECONDS:-3600}
+      POWERBI_MCP_DEFAULT_WORKSPACE_ID: ${POWERBI_MCP_DEFAULT_WORKSPACE_ID:-}
+      POWERBI_MCP_DEFAULT_WORKSPACE_NAME: ${POWERBI_MCP_DEFAULT_WORKSPACE_NAME:-}
+      POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID: ${POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID:-}
+      POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME: ${POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_NAME:-}
+    volumes:
+      - powerbi-mcp-cache:/data/powerbi-mcp-claude
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  powerbi-mcp-cache:

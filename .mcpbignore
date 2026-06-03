@@ -12,6 +12,7 @@ node_modules/undici-types/
 .gitignore
 .dockerignore
 Dockerfile
+docker-compose*.yml
 *.mcpb
 *.mcpb.zip
 .env

@@ -93,10 +93,23 @@ Docker:
 ```bash
 docker build -t powerbi-mcp-claude .
 docker run --rm -p 3000:3000 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop=ALL \
+  --security-opt no-new-privileges=true \
   -v powerbi-mcp-cache:/data/powerbi-mcp-claude \
   -e POWERBI_MCP_TENANT_ID=organizations \
+  -e POWERBI_MCP_HTTP_SESSION_TTL_SECONDS=3600 \
   powerbi-mcp-claude
 ```
+
+Docker Compose:
+
+```bash
+docker compose -f docker-compose.example.yml up --build
+```
+
+The Compose example binds the raw MCP port to `127.0.0.1:3000` so you can put LiteLLM, ngrok, Cloudflare Tunnel, Caddy, nginx, or another ingress in front of it instead of exposing the container port directly.
 
 For production, put the container behind LiteLLM, an ingress, firewall rules, or another network boundary. Anthropic IP allowlisting limits where connector traffic can originate, but it does not identify which Claude user or organization initiated the request. Per-session Power BI auth avoids a shared server-wide Power BI token cache; full OAuth connector auth can be added later if stronger user identity is required at the MCP endpoint.
 
