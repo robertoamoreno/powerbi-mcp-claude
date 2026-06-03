@@ -1,6 +1,6 @@
 {
   "name": "powerbi-mcp-claude",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Claude Desktop and Claude Code MCP server for Microsoft Power BI and Fabric semantic models, DAX queries, and diagnostics.",
   "type": "module",
   "bin": {
@@ -8,7 +8,7 @@
     "powerbi-mcp-claude-http": "dist/src/httpServer.js"
   },
   "files": [
-    "dist",
+    "dist/src",
     "manifest.json",
     ".claude-plugin",
     ".mcp.json",
@@ -27,6 +27,8 @@
     "logout": "node dist/src/index.js --logout",
     "pretest": "npm run build",
     "test": "node --test dist/test/*.test.js",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check && npm test && npm audit --audit-level=low",
     "prepack:mcpb": "npm run build",
     "pack:mcpb": "npx -y @anthropic-ai/mcpb pack"
   },

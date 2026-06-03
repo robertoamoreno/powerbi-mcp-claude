@@ -35,6 +35,27 @@ npm install
 npm run build
 ```
 
+## NPM Stdio Connector
+
+After the package is published to npm, stdio-based connector UIs can run the server with `npx`:
+
+```json
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "npx",
+      "args": ["-y", "powerbi-mcp-claude@latest"],
+      "env": {
+        "POWERBI_MCP_TENANT_ID": "organizations",
+        "POWERBI_MCP_ALLOW_INTERACTIVE_AUTH": "true"
+      }
+    }
+  }
+}
+```
+
+Optional defaults such as `POWERBI_MCP_DEFAULT_WORKSPACE_ID` and `POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID` can be added to the same `env` object when the user wants a preselected Power BI context.
+
 ## Commands
 
 ```bash
