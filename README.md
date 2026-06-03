@@ -37,7 +37,7 @@ npm run build
 
 ## NPM Stdio Connector
 
-After the package is published to npm, stdio-based connector UIs can run the server with `npx`:
+Stdio-based connector UIs can run the server with `npx`:
 
 ```json
 {
@@ -55,6 +55,34 @@ After the package is published to npm, stdio-based connector UIs can run the ser
 ```
 
 Optional defaults such as `POWERBI_MCP_DEFAULT_WORKSPACE_ID` and `POWERBI_MCP_DEFAULT_SEMANTIC_MODEL_ID` can be added to the same `env` object when the user wants a preselected Power BI context.
+
+For gateway deployments such as LiteLLM, prefer the hosted HTTP transport below instead of stdio. A stdio MCP server is spawned on the LiteLLM proxy host or inside the LiteLLM container, so that runtime must already have Node.js, `npx`, network access to npm, and writable npm/token cache directories. Stdio mode also behaves like a single local server process, while hosted HTTP mode gives this project separate Power BI token caches per `Mcp-Session-Id`.
+
+If you still need LiteLLM stdio, first verify from inside the LiteLLM container or host:
+
+```bash
+node --version
+npx -y powerbi-mcp-claude@0.1.10 --status
+```
+
+Then configure stdio with an explicit package version and writable cache paths:
+
+```json
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "npx",
+      "args": ["-y", "powerbi-mcp-claude@0.1.10"],
+      "env": {
+        "NPM_CONFIG_CACHE": "/tmp/npm-cache",
+        "POWERBI_MCP_CACHE_DIR": "/tmp/powerbi-mcp-claude",
+        "POWERBI_MCP_TENANT_ID": "organizations",
+        "POWERBI_MCP_ALLOW_INTERACTIVE_AUTH": "true"
+      }
+    }
+  }
+}
+```
 
 ## Commands
 
@@ -100,6 +128,18 @@ The hosted server exposes:
 
 - `POST /mcp` for MCP JSON-RPC requests.
 - `GET /healthz` for container health checks.
+
+LiteLLM should generally connect to this hosted endpoint with HTTP transport:
+
+```yaml
+mcp_servers:
+  powerbi:
+    transport: http
+    url: "http://powerbi-mcp:3000/mcp"
+    auth_type: none
+```
+
+Use the internal service URL when LiteLLM and this MCP server run on the same Docker network. Use the public HTTPS `/mcp` URL when LiteLLM is outside that network.
 
 Hosted mode creates a separate MSAL token cache per `Mcp-Session-Id` under:
 
