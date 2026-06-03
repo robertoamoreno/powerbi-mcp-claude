@@ -108,15 +108,25 @@ export class MCPProxyTransport implements DeviceCodePrompter {
         continue;
       }
 
-      this.handleIncoming(parsed);
+      await this.processIncoming(parsed, this.writePayload);
     }
 
     log("stdin closed; stopping proxy.");
   }
 
   handleIncoming(parsed: unknown): void {
+    void this.processIncoming(parsed, this.writePayload);
+  }
+
+  async handleRequest(parsed: unknown): Promise<JSONValue[]> {
+    const responses: JSONValue[] = [];
+    await this.processIncoming(parsed, (payload) => responses.push(payload));
+    return responses;
+  }
+
+  private async processIncoming(parsed: unknown, writer: (payload: JSONValue) => void): Promise<void> {
     if (!isJsonRpcPayload(parsed)) {
-      this.writePayload(jsonRpcError(null, INVALID_REQUEST, "Invalid JSON-RPC message."));
+      writer(jsonRpcError(null, INVALID_REQUEST, "Invalid JSON-RPC message."));
       return;
     }
 
@@ -125,14 +135,14 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       return;
     }
 
-    if (this.handleLocalInitialize(payload)) {
+    if (this.handleLocalInitialize(payload, writer)) {
       return;
     }
     if (this.handleInitializedNotification(payload)) {
       return;
     }
 
-    void this.forwardClientPayload(payload);
+    await this.forwardClientPayload(payload, writer);
   }
 
   supportsDeviceCodePrompt(): boolean {
@@ -237,28 +247,28 @@ export class MCPProxyTransport implements DeviceCodePrompter {
     return true;
   }
 
-  private async forwardClientPayload(payload: JSONRPCPayload): Promise<void> {
+  private async forwardClientPayload(payload: JSONRPCPayload, writer: (payload: JSONValue) => void): Promise<void> {
     try {
       const localResponse = await this.handleLocalPayload(payload);
       if (localResponse !== undefined) {
-        this.writePayload(localResponse);
+        writer(localResponse);
         return;
       }
 
       await this.ensureRemoteInitialized();
       const prepared = await this.prepareRemotePayload(payload);
       if ("response" in prepared) {
-        this.writePayload(prepared.response);
+        writer(prepared.response);
         return;
       }
 
       const response = await this.remote.forward(prepared.payload);
       if (response !== null) {
-        this.writeServerResponse(response);
+        this.writeServerResponse(response, writer);
       }
     } catch (error) {
       log(errorMessage(error));
-      this.writeForwardError(payload, error);
+      this.writeForwardError(payload, error, writer);
     }
   }
 
@@ -471,29 +481,29 @@ export class MCPProxyTransport implements DeviceCodePrompter {
     }
   }
 
-  private writeServerResponse(response: JSONValue): void {
+  private writeServerResponse(response: JSONValue, writer: (payload: JSONValue) => void): void {
     if (Array.isArray(response)) {
       for (const item of response) {
         if (isServerMessage(item)) {
-          this.writePayload(item);
+          writer(item);
         }
       }
       return;
     }
 
     if (isServerMessage(response)) {
-      this.writePayload(response);
+      writer(response);
     }
   }
 
-  private writeForwardError(payload: JSONRPCPayload, error: unknown): void {
+  private writeForwardError(payload: JSONRPCPayload, error: unknown, writer: (payload: JSONValue) => void): void {
     const id = firstRequestId(payload);
     if (id === null && !payloadHasRequestId(payload)) {
       return;
     }
 
     if (error instanceof RemoteMCPError) {
-      this.writePayload(
+      writer(
         jsonRpcError(id, error.code, error.message, {
           http_status: error.httpStatus ?? null,
           details: error.data ?? null,
@@ -502,7 +512,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
       return;
     }
 
-    this.writePayload(jsonRpcError(id, INTERNAL_ERROR, errorMessage(error)));
+    writer(jsonRpcError(id, INTERNAL_ERROR, errorMessage(error)));
   }
 
   private captureInitializeCapabilities(payload: JSONRPCPayload): void {
@@ -519,7 +529,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
     }
   }
 
-  private handleLocalInitialize(payload: JSONRPCPayload): boolean {
+  private handleLocalInitialize(payload: JSONRPCPayload, writer: (payload: JSONValue) => void): boolean {
     if (Array.isArray(payload) || payload.method !== "initialize") {
       return false;
     }
@@ -533,7 +543,7 @@ export class MCPProxyTransport implements DeviceCodePrompter {
         ? payload.params.protocolVersion
         : "2025-11-25";
 
-    this.writePayload({
+    writer({
       jsonrpc: "2.0",
       id: normalizeId(payload.id),
       result: {

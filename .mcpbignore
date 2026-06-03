@@ -10,6 +10,8 @@ node_modules/undici-types/
 !dist/src/**
 .git/
 .gitignore
+.dockerignore
+Dockerfile
 *.mcpb
 *.mcpb.zip
 .env

@@ -4,7 +4,8 @@
   "description": "Claude Desktop and Claude Code MCP server for Microsoft Power BI and Fabric semantic models, DAX queries, and diagnostics.",
   "type": "module",
   "bin": {
-    "powerbi-mcp-claude": "dist/src/index.js"
+    "powerbi-mcp-claude": "dist/src/index.js",
+    "powerbi-mcp-claude-http": "dist/src/httpServer.js"
   },
   "files": [
     "dist",
@@ -20,6 +21,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "start": "node dist/src/index.js",
+    "start:http": "node dist/src/httpServer.js",
     "status": "node dist/src/index.js --status",
     "login": "node dist/src/index.js --login",
     "logout": "node dist/src/index.js --logout",

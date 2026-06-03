@@ -39,6 +39,7 @@ npm run build
 
 ```bash
 npm run start          # run stdio MCP proxy
+npm run start:http     # run hosted Streamable HTTP-style MCP server
 npm run login          # authenticate in a terminal and populate the cache
 npm run status         # show non-sensitive cache/account info
 npm run logout         # delete the local MSAL token cache
@@ -64,6 +65,40 @@ The `.claude-plugin/plugin.json`, `.mcp.json`, and `skills/powerbi/SKILL.md` fil
 npm run build
 claude --plugin-dir /path/to/Power-BI-MCP-Node
 ```
+
+## Hosted Remote MCP
+
+Run the hosted HTTP entrypoint when you need a remote MCP endpoint for Claude web/mobile custom connectors or a gateway such as LiteLLM:
+
+```bash
+npm run build
+PORT=3000 POWERBI_MCP_CACHE_DIR=/data/powerbi-mcp-claude npm run start:http
+```
+
+The hosted server exposes:
+
+- `POST /mcp` for MCP JSON-RPC requests.
+- `GET /healthz` for container health checks.
+
+Hosted mode creates a separate MSAL token cache per `Mcp-Session-Id` under:
+
+```text
+${POWERBI_MCP_CACHE_DIR}/sessions/<session-id>/msal_token_cache.json
+```
+
+This prevents one Claude MCP session from reusing another session's Power BI token. The server returns a strong random `Mcp-Session-Id` header and expires inactive sessions after `POWERBI_MCP_HTTP_SESSION_TTL_SECONDS` seconds, defaulting to two hours.
+
+Docker:
+
+```bash
+docker build -t powerbi-mcp-claude .
+docker run --rm -p 3000:3000 \
+  -v powerbi-mcp-cache:/data/powerbi-mcp-claude \
+  -e POWERBI_MCP_TENANT_ID=organizations \
+  powerbi-mcp-claude
+```
+
+For production, put the container behind LiteLLM, an ingress, firewall rules, or another network boundary. Anthropic IP allowlisting limits where connector traffic can originate, but it does not identify which Claude user or organization initiated the request. Per-session Power BI auth avoids a shared server-wide Power BI token cache; full OAuth connector auth can be added later if stronger user identity is required at the MCP endpoint.
 
 ## Authentication UX
 
@@ -143,5 +178,8 @@ The wrappers still require Microsoft sign-in and still route all Power BI operat
 | `POWERBI_MCP_TIMEOUT_SECONDS` | `60` |
 | `POWERBI_MCP_DEVICE_CODE_TIMEOUT_SECONDS` | `900` |
 | `POWERBI_MCP_ALLOW_INTERACTIVE_AUTH` | `true` |
+| `PORT` / `POWERBI_MCP_HTTP_PORT` | `3000` in hosted HTTP mode |
+| `POWERBI_MCP_HTTP_PATH` | `/mcp` |
+| `POWERBI_MCP_HTTP_SESSION_TTL_SECONDS` | `7200` |
 
 Do not paste Microsoft access tokens or refresh tokens into Claude. Use device-code sign-in or a tenant-approved public-client app registration.
