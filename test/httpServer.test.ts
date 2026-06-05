@@ -69,6 +69,26 @@ test("hosted sessions receive isolated MSAL token cache paths", async (t) => {
   assert.notEqual(firstConfig.tokenCachePath, secondConfig.tokenCachePath);
 });
 
+test("hosted HTTP adopts a valid requested session id that is not in memory", async (t) => {
+  const harness = await createHarness(t);
+  const requestedSessionId = "restored-session-id";
+  const restored = await harness.post(authToolPayload(1, "powerbi_auth_status"), requestedSessionId);
+
+  assert.equal(restored.sessionId, requestedSessionId);
+  const restoredConfig = harness.createdConfigs.find((config) => config.cacheDir.endsWith(requestedSessionId));
+  assert.ok(restoredConfig);
+  assert.match(restoredConfig.tokenCachePath, /sessions\/restored-session-id\/msal_token_cache\.json$/);
+});
+
+test("hosted HTTP does not adopt invalid requested session ids", async (t) => {
+  const harness = await createHarness(t);
+  const response = await harness.post(authToolPayload(1, "powerbi_auth_status"), "../bad-session-id");
+
+  assert.ok(response.sessionId);
+  assert.notEqual(response.sessionId, "../bad-session-id");
+  assert.doesNotMatch(response.sessionId, /\.\.|\//);
+});
+
 test("powerbi_auth_start in one hosted session does not authenticate another session", async (t) => {
   const harness = await createHarness(t);
   const first = await harness.post(initializePayload(1));
@@ -128,7 +148,7 @@ test("hosted chat context is isolated per MCP session", async (t) => {
   assert.doesNotMatch(resultText(secondContext.body), /Session One Model|session-one-model/);
 });
 
-test("expired hosted sessions are replaced and do not reuse stale chat context", async (t) => {
+test("expired hosted sessions reset and do not reuse stale chat context", async (t) => {
   let now = 0;
   const harness = await createHarness(t, {
     sessionTtlMs: 1_000,
@@ -156,7 +176,7 @@ test("expired hosted sessions are replaced and do not reuse stale chat context",
   now = 2_000;
   const afterExpiry = await harness.post(authToolPayload(3, "powerbi_get_default_context"), first.sessionId);
   assert.ok(afterExpiry.sessionId);
-  assert.notEqual(afterExpiry.sessionId, first.sessionId);
+  assert.equal(afterExpiry.sessionId, first.sessionId);
   assert.doesNotMatch(resultText(afterExpiry.body), /Expired Model|expired-model/);
 });
 

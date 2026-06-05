@@ -19,6 +19,7 @@ const DEFAULT_HTTP_PATH = "/mcp";
 const DEFAULT_PORT = 3000;
 const DEFAULT_SESSION_TTL_SECONDS = 2 * 60 * 60;
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
 export type HostedMCPServerOptions = {
   config?: ProxyConfig;
@@ -61,15 +62,12 @@ export class HostedMCPSessionManager {
     this.cleanupExpired();
 
     if (requestedSessionId) {
-      const existing = this.sessions.get(requestedSessionId);
-      if (existing && !this.isExpired(existing)) {
-        existing.touchedAt = this.options.now();
-        return { session: existing, created: false };
+      if (!isValidSessionId(requestedSessionId)) {
+        log("Hosted MCP request sent an invalid Mcp-Session-Id; creating a fresh isolated session.");
+        return { session: this.createSession(), created: true };
       }
 
-      if (existing) {
-        this.deleteSession(existing.id);
-      }
+      return this.getOrCreateSession(requestedSessionId);
     }
 
     return { session: this.createSession(), created: true };
@@ -97,10 +95,32 @@ export class HostedMCPSessionManager {
     }
   }
 
-  private createSession(): HostedSession {
-    let id = randomSessionId();
-    while (this.sessions.has(id)) {
+  private getOrCreateSession(sessionId: string): { session: HostedSession; created: boolean } {
+    const existing = this.sessions.get(sessionId);
+    if (existing && !this.isExpired(existing)) {
+      existing.touchedAt = this.options.now();
+      return { session: existing, created: false };
+    }
+
+    if (existing) {
+      this.deleteSession(existing.id);
+    }
+
+    return { session: this.createSession(sessionId), created: true };
+  }
+
+  private createSession(sessionId?: string): HostedSession {
+    let id = sessionId ?? randomSessionId();
+    while (!sessionId && this.sessions.has(id)) {
       id = randomSessionId();
+    }
+
+    if (this.sessions.has(id)) {
+      throw new Error("Hosted MCP session id is already active.");
+    }
+
+    if (!isValidSessionId(id)) {
+      throw new Error("Hosted MCP session id is invalid.");
     }
 
     const config = sessionConfig(this.baseConfig, id);
@@ -123,6 +143,10 @@ export class HostedMCPSessionManager {
 }
 
 export function sessionConfig(baseConfig: ProxyConfig, sessionId: string): ProxyConfig {
+  if (!isValidSessionId(sessionId)) {
+    throw new Error("Hosted MCP session id is invalid.");
+  }
+
   const cacheDir = join(baseConfig.cacheDir, "sessions", sessionId);
   return {
     ...baseConfig,
@@ -278,6 +302,10 @@ function parsePositiveNumber(raw: string | undefined, fallback: number): number 
 
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isValidSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
 }
 
 function randomSessionId(): string {

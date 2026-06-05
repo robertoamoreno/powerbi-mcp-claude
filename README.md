@@ -147,7 +147,7 @@ Hosted mode creates a separate MSAL token cache per `Mcp-Session-Id` under:
 ${POWERBI_MCP_CACHE_DIR}/sessions/<session-id>/msal_token_cache.json
 ```
 
-This prevents one Claude MCP session from reusing another session's Power BI token. The server returns a strong random `Mcp-Session-Id` header and expires inactive sessions after `POWERBI_MCP_HTTP_SESSION_TTL_SECONDS` seconds, defaulting to two hours.
+This prevents one Claude MCP session from reusing another session's Power BI token. The server returns a strong random `Mcp-Session-Id` header for new sessions, restores valid client-supplied session IDs after process restarts, and expires inactive sessions after `POWERBI_MCP_HTTP_SESSION_TTL_SECONDS` seconds, defaulting to two hours.
 
 Docker:
 
